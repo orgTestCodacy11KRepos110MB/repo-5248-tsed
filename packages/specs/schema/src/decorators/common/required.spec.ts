@@ -28,7 +28,7 @@ describe("@Required", () => {
   it("should declare required field (false)", () => {
     // WHEN
     class Model {
-      @Required(false)
+      @Required(false).Error("test")
       num: number;
     }
 
