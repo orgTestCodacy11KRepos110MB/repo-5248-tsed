@@ -1,7 +1,6 @@
 import {
   createContext,
   InjectorService,
-  PlatformProvider,
   PlatformAdapter,
   PlatformApplication,
   PlatformBuilder,
@@ -10,18 +9,19 @@ import {
   PlatformHandlerType,
   PlatformMulter,
   PlatformMulterSettings,
+  PlatformProvider,
   PlatformStaticsOptions,
   runInContext
 } from "@tsed/common";
 import {Env, isFunction, Type} from "@tsed/core";
+import {getMulter} from "@tsed/platform-koa/src/index";
 import {PlatformHandlerMetadata, PlatformLayer} from "@tsed/platform-router";
 import type {PlatformViews} from "@tsed/platform-views";
 import {OptionsJson, OptionsText, OptionsUrlencoded} from "body-parser";
 import Express from "express";
 import {IncomingMessage, ServerResponse} from "http";
-import type multer from "multer";
-import {promisify} from "util";
 import {PlatformExpressStaticsOptions} from "../interfaces/PlatformExpressStaticsOptions";
+import {multerMiddleware} from "../middlewares/multerMiddleware";
 import {staticsMiddleware} from "../middlewares/staticsMiddleware";
 
 declare module "express" {
@@ -53,11 +53,8 @@ declare global {
 @PlatformProvider()
 export class PlatformExpress implements PlatformAdapter<Express.Application> {
   readonly providers = [];
-  #multer: typeof multer;
 
-  constructor(protected injector: InjectorService) {
-    import("multer").then(({default: multer}) => (this.#multer = multer));
-  }
+  constructor(protected injector: InjectorService) {}
 
   /**
    * Create new serverless application. In this mode, the component scan are disabled.
@@ -85,7 +82,7 @@ export class PlatformExpress implements PlatformAdapter<Express.Application> {
 
   async beforeLoadRoutes() {
     const injector = this.injector;
-    const app = this.injector.get<PlatformApplication<Express.Application>>(PlatformApplication)!;
+    const app = this.getPlatformApplication()!;
 
     // disable x-powered-by header
     injector.settings.get("env") === Env.PROD && app.getApp().disable("x-powered-by");
@@ -94,7 +91,7 @@ export class PlatformExpress implements PlatformAdapter<Express.Application> {
   }
 
   async afterLoadRoutes() {
-    const app = this.injector.get<PlatformApplication<Express.Application>>(PlatformApplication)!;
+    const app = this.getPlatformApplication()!;
     const platformExceptions = this.injector.get<PlatformExceptions>(PlatformExceptions)!;
 
     // NOT FOUND
@@ -179,28 +176,7 @@ export class PlatformExpress implements PlatformAdapter<Express.Application> {
   }
 
   multipart(options: PlatformMulterSettings): PlatformMulter {
-    const m = this.#multer(options);
-
-    const makePromise = (multer: any, name: string) => {
-      // istanbul ignore next
-      if (!multer[name]) return;
-
-      const fn = multer[name];
-
-      multer[name] = function apply(...args: any[]) {
-        const middleware = Reflect.apply(fn, this, args);
-
-        return (req: any, res: any) => promisify(middleware)(req, res);
-      };
-    };
-
-    makePromise(m, "any");
-    makePromise(m, "array");
-    makePromise(m, "fields");
-    makePromise(m, "none");
-    makePromise(m, "single");
-
-    return m;
+    return multerMiddleware(options);
   }
 
   statics(endpoint: string, options: PlatformStaticsOptions) {
